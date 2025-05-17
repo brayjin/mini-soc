@@ -1,93 +1,102 @@
-import { useEffect, useState } from "react";
-import { io } from "socket.io-client";
+import React, { useEffect, useState } from "react";
 
-const socket = io("http://localhost:5000");
-
-function App() {
+export default function App() {
   const [alerts, setAlerts] = useState([]);
-  const [message, setMessage] = useState("");
 
+  // Fetch alerts periodically
   useEffect(() => {
+    const fetchAlerts = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/alerts");
+        const data = await res.json();
+        setAlerts(data);
+      } catch (error) {
+        console.error("Failed to fetch alerts:", error);
+      }
+    };
+
     fetchAlerts();
+    const interval = setInterval(fetchAlerts, 5000); // refresh every 5 sec
 
-    socket.on("new_alert", (newAlert) => {
-      console.log("\u26a1 New alert received:", newAlert);
-      setAlerts((prev) => [newAlert, ...prev]);
-    });
-
-    return () => socket.disconnect();
+    return () => clearInterval(interval);
   }, []);
 
-  const fetchAlerts = async () => {
-    const res = await fetch("http://localhost:5000/alerts");
-    const data = await res.json();
-    setAlerts(data);
+  // Block or unblock IP (simplified handlers)
+  const blockIp = async (ip) => {
+    await fetch(`http://localhost:5000/block/${ip}`, { method: "POST" });
   };
 
-  const blockIP = async (ip) => {
-    const res = await fetch(`http://localhost:5000/block/${ip}`, { method: "POST" });
-    const data = await res.json();
-    setMessage(data.message);
-    fetchAlerts();
-    setTimeout(() => setMessage(""), 3000);
-  };
-
-  const unblockIP = async (ip) => {
-    const res = await fetch(`http://localhost:5000/unblock/${ip}`, { method: "POST" });
-    const data = await res.json();
-    setMessage(data.message);
-    fetchAlerts();
-    setTimeout(() => setMessage(""), 3000);
+  const unblockIp = async (ip) => {
+    await fetch(`http://localhost:5000/unblock/${ip}`, { method: "POST" });
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-4">\ud83d\udee1\ufe0f Mini SOC Dashboard</h1>
+    <div className="min-h-screen bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 text-gray-100 p-8 font-sans">
+      <header className="mb-10">
+        <h1 className="text-4xl font-extrabold tracking-wide">Mini SOC Dashboard</h1>
+        <p className="mt-2 text-gray-400">Real-time Security Alerts & IP Management</p>
+      </header>
 
-        {message && (
-          <div className="bg-green-600 px-4 py-2 rounded mb-4 shadow-md animate-pulse">
-            {message}
-          </div>
-        )}
-
-        {alerts.length === 0 ? (
-          <p className="text-gray-400">No alerts yet.</p>
-        ) : (
-          <div className="space-y-4">
+      <main>
+        <table className="w-full table-auto border-collapse border border-gray-700 rounded-lg overflow-hidden shadow-lg">
+          <thead className="bg-gray-800 text-gray-300 uppercase text-sm font-semibold">
+            <tr>
+              <th className="border border-gray-700 p-3 text-left">Timestamp</th>
+              <th className="border border-gray-700 p-3 text-left">IP Address</th>
+              <th className="border border-gray-700 p-3 text-left">Type</th>
+              <th className="border border-gray-700 p-3 text-left">Attempts</th>
+              <th className="border border-gray-700 p-3 text-left">Status</th>
+              <th className="border border-gray-700 p-3 text-left">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {alerts.length === 0 && (
+              <tr>
+                <td colSpan="6" className="text-center p-6 text-gray-500">
+                  No alerts available
+                </td>
+              </tr>
+            )}
             {alerts.map((alert, idx) => (
-              <div
+              <tr
                 key={idx}
-                className="bg-gray-800 p-4 rounded shadow hover:shadow-lg transition"
+                className={`border border-gray-700 hover:bg-gray-700 transition-colors ${
+                  alert.status === "blocked" ? "bg-red-900" : "bg-gray-900"
+                }`}
               >
-                <p><b>Type:</b> {alert.type}</p>
-                <p><b>IP:</b> {alert.ip}</p>
-                <p><b>Attempts:</b> {alert.attempts}</p>
-                <p><b>Status:</b> {alert.status}</p>
-                <p><b>Timestamp:</b> {alert.timestamp}</p>
-
-                {alert.status === "blocked" ? (
-                  <button
-                    onClick={() => unblockIP(alert.ip)}
-                    className="mt-3 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded"
-                  >
-                    \ud83d\udd13 Unblock IP
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => blockIP(alert.ip)}
-                    className="mt-3 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded"
-                  >
-                    \ud83d\udeab Block IP
-                  </button>
-                )}
-              </div>
+                <td className="p-3">{alert.timestamp}</td>
+                <td className="p-3 font-mono">{alert.ip}</td>
+                <td className="p-3">{alert.type}</td>
+                <td className="p-3">{alert.attempts ?? "-"}</td>
+                <td
+                  className={`p-3 font-semibold ${
+                    alert.status === "blocked" ? "text-red-400" : "text-green-400"
+                  }`}
+                >
+                  {alert.status}
+                </td>
+                <td className="p-3">
+                  {alert.status === "blocked" ? (
+                    <button
+                      onClick={() => unblockIp(alert.ip)}
+                      className="px-4 py-1 bg-green-600 rounded hover:bg-green-700 transition"
+                    >
+                      Unblock
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => blockIp(alert.ip)}
+                      className="px-4 py-1 bg-red-600 rounded hover:bg-red-700 transition"
+                    >
+                      Block
+                    </button>
+                  )}
+                </td>
+              </tr>
             ))}
-          </div>
-        )}
-      </div>
+          </tbody>
+        </table>
+      </main>
     </div>
   );
 }
-
-export default App;

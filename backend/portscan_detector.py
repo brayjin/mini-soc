@@ -1,59 +1,53 @@
-# portscan_detector.py
-import time
 import subprocess
 import re
-from datetime import datetime
+import time
+import json
 import requests
+from collections import defaultdict
 
-BACKEND_URL = "http://localhost:5000/test-alert"
-scan_threshold = 10
-scan_window = 5
-ip_activity = {}
+# CONFIG
+SCAN_THRESHOLD = 10         # Number of unique ports accessed by same IP within TIME_WINDOW
+TIME_WINDOW = 10            # Seconds
+FLASK_ALERT_ENDPOINT = "http://localhost:5000/report-portscan"
 
-def add_alert(ip, port_count):
-    alert = {
-        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        "ip": ip,
-        "type": "Port Scan Detected",
-        "ports_scanned": port_count,
-        "status": "active"
-    }
-    print("🚨 Port scan alert:", alert)
+# State
+ip_activity = defaultdict(list)
+
+def extract_connection_info(line):
+    match = re.search(r'IP (\d+\.\d+\.\d+\.\d+)\.\d+ > .*:(\d+)', line)
+    if match:
+        return match.group(1), match.group(2)
+    return None, None
+
+def send_alert(ip):
     try:
-        requests.post(BACKEND_URL, json=alert)
+        response = requests.post(FLASK_ALERT_ENDPOINT, json={'ip': ip})
+        print(f"🚨 Port scan alert sent for {ip}: {response.status_code}")
     except Exception as e:
-        print("❌ Failed to send alert:", e)
+        print(f"❌ Failed to send alert: {e}")
 
-def detect_scan():
-    print("🔍 Starting Port Scan Detector...")
-    process = subprocess.Popen(
-        ['sudo', 'tcpdump', '-l', '-n', 'tcp'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True
-    )
+def monitor_packets():
+    print("📡 Monitoring for port scans...")
+    proc = subprocess.Popen(['tcpdump', '-n', 'tcp'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 
     try:
-        for line in process.stdout:
-            match = re.search(r'IP (\d+\.\d+\.\d+\.\d+)\.\d+ > .*:(\d+)', line)
-            if match:
-                ip = match.group(1)
-                port = match.group(2)
-                now = time.time()
+        for line in proc.stdout:
+            src_ip, dst_port = extract_connection_info(line)
+            if not src_ip or not dst_port:
+                continue
 
-                if ip not in ip_activity:
-                    ip_activity[ip] = []
+            now = time.time()
+            ip_activity[src_ip] = [(p, t) for (p, t) in ip_activity[src_ip] if now - t < TIME_WINDOW]
+            ip_activity[src_ip].append((dst_port, now))
 
-                ip_activity[ip] = [entry for entry in ip_activity[ip] if now - entry[1] <= scan_window]
-                ip_activity[ip].append((port, now))
-
-                unique_ports = set(port for port, _ in ip_activity[ip])
-
-                if len(unique_ports) >= scan_threshold:
-                    add_alert(ip, len(unique_ports))
-                    ip_activity[ip] = []
+            unique_ports = set([p for p, _ in ip_activity[src_ip]])
+            if len(unique_ports) >= SCAN_THRESHOLD:
+                print(f"🔎 Detected possible port scan from {src_ip} on ports: {list(unique_ports)}")
+                send_alert(src_ip)
+                ip_activity[src_ip] = []  # Reset
     except KeyboardInterrupt:
-        print("🛑 Stopped Port Scan Detector")
+        print("🛑 Stopping packet monitor...")
+        proc.terminate()
 
 if __name__ == "__main__":
-    detect_scan()
+    monitor_packets()
