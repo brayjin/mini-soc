@@ -13,7 +13,7 @@ mini-soc-project/
 ├── backend/
 │   ├── app.py                 # Flask backend with WebSocket support
 │   ├── alerts/                # JSON-based alert log storage
-│   ├── ssh_detector.py        # SSH brute-force detection logic
+│   ├── parse.py        # SSH brute-force detection logic
 │   └── portscan_detector.py   # Port scanning detection logic
 ├── frontend/
 │   ├── src/
