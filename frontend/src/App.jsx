@@ -9,9 +9,13 @@ export default function App() {
       try {
         const res = await fetch("http://localhost:5000/alerts");
         const data = await res.json();
-        setAlerts(data);
+        console.log("Fetched alerts:", data); // debug log
+
+        // Ensure data is an array; fallback to empty array if not
+        setAlerts(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Failed to fetch alerts:", error);
+        setAlerts([]); // fallback to empty array
       }
     };
 
@@ -50,14 +54,14 @@ export default function App() {
             </tr>
           </thead>
           <tbody>
-            {alerts.length === 0 && (
+            {(!Array.isArray(alerts) || alerts.length === 0) && (
               <tr>
                 <td colSpan="6" className="text-center p-6 text-gray-500">
                   No alerts available
                 </td>
               </tr>
             )}
-            {alerts.map((alert, idx) => (
+            {Array.isArray(alerts) && alerts.map((alert, idx) => (
               <tr
                 key={idx}
                 className={`border border-gray-700 hover:bg-gray-700 transition-colors ${

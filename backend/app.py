@@ -11,24 +11,40 @@ CORS(app)
 ALERTS_FILE = '../alerts/alerts.json'
 print("Alerts file path:", os.path.abspath(ALERTS_FILE))
 
-
 def current_timestamp():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+def ensure_alerts_file():
+    """Create alerts file with empty JSON array if it doesn't exist or is empty."""
+    if not os.path.exists(ALERTS_FILE):
+        print("Alerts file not found, creating new one with empty list.")
+        os.makedirs(os.path.dirname(ALERTS_FILE), exist_ok=True)
+        with open(ALERTS_FILE, 'w') as f:
+            json.dump([], f)
+    elif os.path.getsize(ALERTS_FILE) == 0:
+        print("Alerts file is empty, initializing with empty list.")
+        with open(ALERTS_FILE, 'w') as f:
+            json.dump([], f)
 
 def load_alerts():
-    if not os.path.exists(ALERTS_FILE):
-        print("Alerts file not found, returning empty list.")
-        return []
-    with open(ALERTS_FILE, 'r') as f:
-        try:
-            alerts = json.load(f)
+    ensure_alerts_file()
+    try:
+        with open(ALERTS_FILE, 'r') as f:
+            content = f.read().strip()
+            if not content:
+                print("Alerts file is empty, returning empty list.")
+                return []
+            alerts = json.loads(content)
             print(f"Loaded alerts: {alerts}")
             return alerts
-        except json.JSONDecodeError:
-            print("❌ Invalid JSON format, resetting alerts to empty list...")
-            return []
-
+    except json.JSONDecodeError:
+        print("❌ Invalid JSON format, resetting alerts to empty list...")
+        with open(ALERTS_FILE, 'w') as f:
+            json.dump([], f)
+        return []
+    except Exception as e:
+        print(f"❌ Unexpected error reading alerts file: {e}")
+        return []
 
 def save_alerts(alerts):
     print("Saving alerts to file...")
@@ -39,12 +55,10 @@ def save_alerts(alerts):
     except Exception as e:
         print(f"❌ Error saving alerts: {e}")
 
-
 def is_ip_blocked(ip):
     result = subprocess.run(['sudo', 'iptables', '-C', 'INPUT', '-s', ip, '-j', 'DROP'],
                             capture_output=True)
     return result.returncode == 0
-
 
 def run_iptables_command(args):
     try:
@@ -54,12 +68,10 @@ def run_iptables_command(args):
         print(f"❌ Failed to execute iptables command: {e}")
         raise
 
-
 @app.route('/alerts', methods=['GET'])
 def get_alerts():
     alerts = load_alerts()
     return jsonify(alerts)
-
 
 @app.route('/block/<ip>', methods=['POST'])
 def block_ip(ip):
@@ -74,6 +86,7 @@ def block_ip(ip):
         if alert['ip'] == ip:
             alert['status'] = 'blocked'
             found = True
+
     if not found:
         alerts.append({
             "timestamp": current_timestamp(),
@@ -81,6 +94,7 @@ def block_ip(ip):
             "type": "Manual Block",
             "status": "blocked"
         })
+    
     save_alerts(alerts)
 
     try:
@@ -88,7 +102,6 @@ def block_ip(ip):
         return jsonify({"message": f"IP {ip} blocked"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.route('/unblock/<ip>', methods=['POST'])
 def unblock_ip(ip):
@@ -108,6 +121,7 @@ def unblock_ip(ip):
         if alert['ip'] == ip:
             alert['status'] = 'active'
             found = True
+
     if not found:
         alerts.append({
             "timestamp": current_timestamp(),
@@ -115,12 +129,10 @@ def unblock_ip(ip):
             "type": "Manual Unblock",
             "status": "active"
         })
-    save_alerts(alerts)
 
+    save_alerts(alerts)
     return jsonify({"message": f"IP {ip} unblocked"}), 200
 
-
-# 🔍 NEW: Report a Port Scanning Attempt
 @app.route('/report-portscan', methods=['POST'])
 def report_port_scan():
     data = request.get_json()
@@ -141,7 +153,5 @@ def report_port_scan():
     save_alerts(alerts)
     return jsonify({"message": f"Port scan attempt by {ip} recorded"}), 201
 
-
 if __name__ == '__main__':
     app.run(debug=True)
-

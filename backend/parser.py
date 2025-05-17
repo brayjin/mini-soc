@@ -1,18 +1,19 @@
-# backend/parser.py
 import re
 import time
 import json
+import os
 from collections import defaultdict
 from datetime import datetime
 
 # Config
 LOG_FILE = "/var/log/auth.log"
 ALERTS_FILE = "../alerts/alerts.json"
-THRESHOLD = 5  # how many failed attempts trigger an alert
+THRESHOLD = 2
+COOLDOWN = 60  # Seconds
 
-# In-memory tracker
+# Trackers
 failed_logins = defaultdict(int)
-already_alerted = set()
+last_alert_time = {}
 
 def write_alert(ip, count):
     alert = {
@@ -25,13 +26,26 @@ def write_alert(ip, count):
 
     print(f"🚨 ALERT: {alert}")
 
-    with open(ALERTS_FILE, "a") as f:
-        f.write(json.dumps(alert) + "\n")  # Line-delimited JSON
+    try:
+        # Load existing alerts
+        alerts = []
+        if os.path.exists(ALERTS_FILE) and os.path.getsize(ALERTS_FILE) > 0:
+            with open(ALERTS_FILE, "r") as f:
+                alerts = json.load(f)
+
+        alerts.append(alert)
+
+        # Write updated alerts back to file
+        with open(ALERTS_FILE, "w") as f:
+            json.dump(alerts, f, indent=2)
+
+    except Exception as e:
+        print(f"❌ Error writing alert: {e}")
 
 def monitor_logs():
     print("🔍 Starting SSH log monitoring...")
     with open(LOG_FILE, "r") as log:
-        log.seek(0, 2)  # Move to the end of the log file
+        log.seek(0, 2)  # Jump to end of file
 
         while True:
             line = log.readline()
@@ -43,11 +57,13 @@ def monitor_logs():
             if match:
                 ip = match.group(1)
                 failed_logins[ip] += 1
-                print(f"⚠️  Failed attempt from {ip} (count: {failed_logins[ip]})")
+                print(f"⚠️ Failed attempt from {ip} (count: {failed_logins[ip]})")
 
-                if failed_logins[ip] >= THRESHOLD and ip not in already_alerted:
-                    write_alert(ip, failed_logins[ip])
-                    already_alerted.add(ip)
+                now = time.time()
+                if failed_logins[ip] >= THRESHOLD:
+                    if ip not in last_alert_time or now - last_alert_time[ip] >= COOLDOWN:
+                        write_alert(ip, failed_logins[ip])
+                        last_alert_time[ip] = now
 
 if __name__ == "__main__":
     monitor_logs()
