@@ -89,7 +89,7 @@ Visit `http://localhost:5173`
 
 ```bash
 cd backend
-sudo python3 ssh_detector.py
+sudo python3 parse.py
 ```
 
 This parses `/var/log/auth.log` and sends alerts to `/test-alert`.
