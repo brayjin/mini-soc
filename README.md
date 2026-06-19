@@ -1,208 +1,350 @@
+# 🛡️ Mini SOC - Real-Time Intrusion Detection & Response Dashboard
+
+A lightweight Security Operations Center (SOC) platform built with Python, Flask, SQLite, React, and Tailwind CSS.
+
+The system monitors suspicious activity on Linux systems, detects SSH brute-force attacks and port scans, stores alerts in SQLite, and allows security analysts to block or unblock malicious IPs directly from the dashboard.
+
 ---
 
-## 🛡️ Mini SOC: Real-Time Intrusion Detection Dashboard
+## Features
 
-A lightweight Security Operations Center (SOC) system that detects suspicious activities like SSH brute-force attacks and port scanning on a Linux server, and provides a live dashboard with block/unblock controls.
+### Detection
+
+* SSH Brute Force Detection
+* Port Scan Detection
+* Real-Time Alert Generation
+* Automatic Alert Persistence
+
+### Response
+
+* Block Malicious IPs
+* Unblock Previously Blocked IPs
+* Alert Status Tracking
+* Firewall Integration (iptables)
+
+### Dashboard
+
+* React + Tailwind UI
+* Live Alert Updates
+* Alert Statistics
+* Alert Management Interface
+
+### Storage
+
+* SQLite Database
+* SQLAlchemy ORM
+* Persistent Alert History
 
 ---
 
-### 📁 Project Structure
+## Architecture
 
+```text
+Nmap / Attack Traffic
+          │
+          ▼
+portscan_detector.py
+          │
+          ▼
+      Flask API
+          │
+          ▼
+       SQLite
+          ▲
+          │
+     parser.py
+          │
+          ▼
+     SSH Logs
+
+          │
+          ▼
+    React Dashboard
 ```
-mini-soc-project/
+
+---
+
+## Project Structure
+
+```text
+mini-soc/
+
 ├── backend/
-│   ├── app.py                 # Flask backend with WebSocket support
-│   ├── alerts/                # JSON-based alert log storage
-│   ├── parse.py        # SSH brute-force detection logic
-│   └── portscan_detector.py   # Port scanning detection logic
+│   ├── app.py
+│   ├── parser.py
+│   ├── portscan_detector.py
+│   ├── database.py
+│   ├── models.py
+│   ├── init_db.py
+│   └── soc.db
+│
 ├── frontend/
 │   ├── src/
-│   │   └── App.jsx            # React frontend
-│   └── index.html, etc.       # Vite setup
-└── README.md                  # You're here!
+│   │   ├── App.jsx
+│   │   ├── main.jsx
+│   │   └── index.css
+│   │
+│   ├── package.json
+│   └── vite.config.js
+│
+└── README.md
 ```
 
 ---
 
-### ⚙️ Features
+## Backend Setup
 
-- ✅ SSH Brute-force detection using `/var/log/auth.log`
-- ✅ Port Scan detection using `tcpdump`
-- ✅ Flask REST API + WebSocket backend
-- ✅ React + Tailwind CSS dashboard
-- ✅ Real-time alerting
-- ✅ IP block/unblock using `iptables`
-- ✅ Persistent alert logs (JSON)
-- 🔒 Simple status view (`active` / `blocked`)
-
----
-
-## 🚀 Getting Started
-
-### 🐍 Backend (Flask API)
-
-#### 1. Install dependencies
+### Create Virtual Environment
 
 ```bash
 cd backend
-python3 -m venv venv
+
+python -m venv venv
+
 source venv/bin/activate
-pip install flask flask-socketio eventlet
 ```
 
-#### 2. Run the backend
+### Install Dependencies
 
 ```bash
-python3 app.py
+pip install flask
+pip install flask-cors
+pip install sqlalchemy
+pip install requests
 ```
 
-You should see:
+### Initialize Database
 
+```bash
+python init_db.py
 ```
-🚀 Backend running on http://localhost:5000
+
+Expected:
+
+```text
+Database initialized.
+```
+
+### Start Flask API
+
+```bash
+python app.py
+```
+
+Expected:
+
+```text
+Running on http://localhost:5000
 ```
 
 ---
 
-### ⚛️ Frontend (React UI)
-
-#### 1. Setup
+## Frontend Setup
 
 ```bash
 cd frontend
+
 npm install
-```
 
-#### 2. Run frontend
-
-```bash
 npm run dev
 ```
 
-Visit `http://localhost:5173`
+Frontend:
 
----
-
-## 🔍 Detectors
-
-### ✅ SSH Brute-force Detector
-
-```bash
-cd backend
-sudo python3 parse.py
-```
-
-This parses `/var/log/auth.log` and sends alerts to `/test-alert`.
-
----
-
-### ✅ Port Scan Detector
-
-```bash
-cd backend
-sudo python3 portscan_detector.py
-```
-
-Scans incoming TCP traffic and detects rapid port scanning.
-
-> ⚠️ Requires `tcpdump`:
-```bash
-sudo apt install tcpdump
+```text
+http://localhost:5173
 ```
 
 ---
 
-## 🧪 Manual Test
+## Detection Services
 
-To send a one-time alert to the backend:
+### SSH Brute Force Detector
 
 ```bash
-curl -X POST http://localhost:5000/test-alert \
-  -H "Content-Type: application/json" \
-  -d '{"timestamp":"2025-04-30 18:00:00", "ip":"192.168.0.5", "type":"Test Alert", "attempts":5, "status":"active"}'
+python parser.py
+```
+
+Monitors:
+
+```text
+journalctl -f
+```
+
+or
+
+```text
+/var/log/auth.log
+```
+
+depending on distribution.
+
+---
+
+### Port Scan Detector
+
+Install tcpdump:
+
+```bash
+sudo pacman -S tcpdump
+```
+
+Grant permissions:
+
+```bash
+sudo setcap cap_net_raw,cap_net_admin=eip $(which tcpdump)
+```
+
+Run detector:
+
+```bash
+python portscan_detector.py
 ```
 
 ---
 
-## 💻 Dashboard UI
+## API Endpoints
 
-Live updates for every alert.
+### Get Alerts
 
-Each alert shows:
-
-- Type (e.g., Port Scan)
-- IP Address
-- Attempt count
-- Status (`active`, `blocked`)
-- Timestamp
-
-And includes buttons to:
-
-- 🚫 Block IP
-- 🔓 Unblock IP
-
----
-
-## 🔐 IP Blocking
-
-Alerts can be blocked via:
-
-```bash
-sudo iptables -A INPUT -s <ip> -j DROP
-```
-
-And unblocked:
-
-```bash
-sudo iptables -D INPUT -s <ip> -j DROP
+```http
+GET /alerts
 ```
 
 ---
 
-## 📦 API Routes
+### Health Check
 
-| Endpoint                  | Method | Description                |
-|---------------------------|--------|----------------------------|
-| `/alerts`                | GET    | Fetch all alerts           |
-| `/test-alert`            | POST   | Send custom alert          |
-| `/block/<ip>`            | POST   | Block a suspicious IP      |
-| `/unblock/<ip>`          | POST   | Unblock a previously blocked IP |
+```http
+GET /health
+```
 
 ---
 
-## 🌐 WebSocket
+### Report Port Scan
 
-- **Channel**: `/socket.io`
-- **Event**: `new_alert`
-- **Client**: React connects using `socket.io-client`
-- Backend emits real-time updates on new alert arrival.
+```http
+POST /report-portscan
+```
 
----
+Body:
 
-## 🧠 To-Do / Milestones
-
-- [x] SSH brute-force detection
-- [x] Port scan detection
-- [x] Real-time frontend
-- [x] Block/unblock IPs
-- [ ] Dashboard analytics (charts, stats)
-- [ ] Authentication for admin UI
-- [ ] Persistent DB (e.g., SQLite/PostgreSQL)
+```json
+{
+  "ip": "192.168.1.100"
+}
+```
 
 ---
 
-## 🛠️ Developer Notes
+### Report Brute Force
 
-- This app is built for local network defense simulations.
-- You must run detection scripts with **sudo**.
-- Designed for educational and demonstration purposes only.
+```http
+POST /report-bruteforce
+```
+
+Body:
+
+```json
+{
+  "ip": "192.168.1.100",
+  "attempts": 5
+}
+```
 
 ---
 
-## 🧑‍💻 Author
+### Block IP
 
-Made with ❤️ by Brayjin J Antony  
-`CSE Cybersecurity | KSR Institute`  
-GitHub: [@brayjin](https://github.com/brayjin)
+```http
+POST /block/<ip>
+```
 
 ---
+
+### Unblock IP
+
+```http
+POST /unblock/<ip>
+```
+
+---
+
+## Database Schema
+
+### alerts
+
+| Field     | Type    |
+| --------- | ------- |
+| id        | Integer |
+| timestamp | String  |
+| ip        | String  |
+| type      | String  |
+| status    | String  |
+| attempts  | Integer |
+
+### blocked_ips
+
+| Field | Type    |
+| ----- | ------- |
+| id    | Integer |
+| ip    | String  |
+
+---
+
+## Testing
+
+### Port Scan Detection
+
+```bash
+nmap -sS -p 1-100 192.168.1.10
+```
+
+Expected:
+
+* Alert generated
+* Stored in SQLite
+* Appears on dashboard
+
+### Blocking
+
+Click:
+
+```text
+Block
+```
+
+Expected:
+
+```bash
+sudo iptables -L INPUT -n
+```
+
+shows:
+
+```text
+DROP all -- <ip> 0.0.0.0/0
+```
+
+---
+
+## Future Improvements
+
+* WebSocket Live Updates
+* Auto-Blocking Rules
+* Alert Severity Levels
+* Authentication
+* Docker Deployment
+* Email Notifications
+* SIEM Integration
+* Threat Intelligence Feeds
+
+---
+
+## Author
+
+Brayjin J Antony
+
+B.E. Computer Science & Engineering (Cyber Security)
+
+Mini SOC Project for Security Monitoring and Incident Response Demonstration.
