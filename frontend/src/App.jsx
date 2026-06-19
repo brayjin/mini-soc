@@ -1,106 +1,255 @@
 import React, { useEffect, useState } from "react";
 
+const API_URL = "http://localhost:5000";
+
 export default function App() {
   const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Fetch alerts periodically
-  useEffect(() => {
-    const fetchAlerts = async () => {
-      try {
-        const res = await fetch("http://localhost:5000/alerts");
-        const data = await res.json();
-        console.log("Fetched alerts:", data); // debug log
+  const fetchAlerts = async () => {
+    try {
+      const res = await fetch(`${API_URL}/alerts`);
 
-        // Ensure data is an array; fallback to empty array if not
-        setAlerts(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error("Failed to fetch alerts:", error);
-        setAlerts([]); // fallback to empty array
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
       }
-    };
 
+      const data = await res.json();
+
+      setAlerts(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Failed to fetch alerts:", err);
+      setAlerts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 5000); // refresh every 5 sec
+
+    const interval = setInterval(fetchAlerts, 5000);
 
     return () => clearInterval(interval);
   }, []);
 
-  // Block or unblock IP (simplified handlers)
   const blockIp = async (ip) => {
-    await fetch(`http://localhost:5000/block/${ip}`, { method: "POST" });
+    try {
+      const res = await fetch(
+        `${API_URL}/block/${ip}`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data = await res.json();
+
+      console.log(data);
+
+      await fetchAlerts();
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const unblockIp = async (ip) => {
-    await fetch(`http://localhost:5000/unblock/${ip}`, { method: "POST" });
+    try {
+      const res = await fetch(
+        `${API_URL}/unblock/${ip}`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data = await res.json();
+
+      console.log(data);
+
+      await fetchAlerts();
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 text-gray-100 p-8 font-sans">
-      <header className="mb-10">
-        <h1 className="text-4xl font-extrabold tracking-wide">Mini SOC Dashboard</h1>
-        <p className="mt-2 text-gray-400">Real-time Security Alerts & IP Management</p>
-      </header>
+    <div className="min-h-screen bg-gray-950 text-gray-100 p-8">
+      <div className="max-w-7xl mx-auto">
 
-      <main>
-        <table className="w-full table-auto border-collapse border border-gray-700 rounded-lg overflow-hidden shadow-lg">
-          <thead className="bg-gray-800 text-gray-300 uppercase text-sm font-semibold">
-            <tr>
-              <th className="border border-gray-700 p-3 text-left">Timestamp</th>
-              <th className="border border-gray-700 p-3 text-left">IP Address</th>
-              <th className="border border-gray-700 p-3 text-left">Type</th>
-              <th className="border border-gray-700 p-3 text-left">Attempts</th>
-              <th className="border border-gray-700 p-3 text-left">Status</th>
-              <th className="border border-gray-700 p-3 text-left">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(!Array.isArray(alerts) || alerts.length === 0) && (
-              <tr>
-                <td colSpan="6" className="text-center p-6 text-gray-500">
-                  No alerts available
-                </td>
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold">
+            Mini SOC Dashboard
+          </h1>
+
+          <p className="text-gray-400 mt-2">
+            Real-time Security Monitoring
+          </p>
+        </div>
+
+        <div className="mb-6 flex gap-4">
+
+          <div className="bg-gray-900 p-4 rounded-lg border border-gray-800">
+            <div className="text-gray-400 text-sm">
+              Total Alerts
+            </div>
+
+            <div className="text-3xl font-bold">
+              {alerts.length}
+            </div>
+          </div>
+
+          <div className="bg-gray-900 p-4 rounded-lg border border-gray-800">
+            <div className="text-gray-400 text-sm">
+              Blocked
+            </div>
+
+            <div className="text-3xl font-bold text-red-400">
+              {
+                alerts.filter(
+                  a => a.status === "blocked"
+                ).length
+              }
+            </div>
+          </div>
+
+        </div>
+
+        <div className="overflow-x-auto">
+
+          <table className="w-full border border-gray-800">
+
+            <thead>
+              <tr className="bg-gray-900">
+
+                <th className="p-3 text-left">
+                  Timestamp
+                </th>
+
+                <th className="p-3 text-left">
+                  IP
+                </th>
+
+                <th className="p-3 text-left">
+                  Type
+                </th>
+
+                <th className="p-3 text-left">
+                  Attempts
+                </th>
+
+                <th className="p-3 text-left">
+                  Status
+                </th>
+
+                <th className="p-3 text-left">
+                  Action
+                </th>
+
               </tr>
-            )}
-            {Array.isArray(alerts) && alerts.map((alert, idx) => (
-              <tr
-                key={idx}
-                className={`border border-gray-700 hover:bg-gray-700 transition-colors ${
-                  alert.status === "blocked" ? "bg-red-900" : "bg-gray-900"
-                }`}
-              >
-                <td className="p-3">{alert.timestamp}</td>
-                <td className="p-3 font-mono">{alert.ip}</td>
-                <td className="p-3">{alert.type}</td>
-                <td className="p-3">{alert.attempts ?? "-"}</td>
-                <td
-                  className={`p-3 font-semibold ${
-                    alert.status === "blocked" ? "text-red-400" : "text-green-400"
-                  }`}
+            </thead>
+
+            <tbody>
+
+              {loading && (
+                <tr>
+                  <td
+                    colSpan="6"
+                    className="p-8 text-center"
+                  >
+                    Loading...
+                  </td>
+                </tr>
+              )}
+
+              {!loading &&
+                alerts.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan="6"
+                      className="p-8 text-center text-gray-500"
+                    >
+                      No alerts found
+                    </td>
+                  </tr>
+                )}
+
+              {alerts.map((alert) => (
+
+                <tr
+                  key={
+                    alert.id ??
+                    `${alert.ip}-${alert.timestamp}`
+                  }
+                  className="border-t border-gray-800"
                 >
-                  {alert.status}
-                </td>
-                <td className="p-3">
-                  {alert.status === "blocked" ? (
-                    <button
-                      onClick={() => unblockIp(alert.ip)}
-                      className="px-4 py-1 bg-green-600 rounded hover:bg-green-700 transition"
+
+                  <td className="p-3">
+                    {alert.timestamp}
+                  </td>
+
+                  <td className="p-3 font-mono">
+                    {alert.ip}
+                  </td>
+
+                  <td className="p-3">
+                    {alert.type}
+                  </td>
+
+                  <td className="p-3">
+                    {alert.attempts ?? "-"}
+                  </td>
+
+                  <td className="p-3">
+
+                    <span
+                      className={
+                        alert.status === "blocked"
+                          ? "text-red-400"
+                          : "text-green-400"
+                      }
                     >
-                      Unblock
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => blockIp(alert.ip)}
-                      className="px-4 py-1 bg-red-600 rounded hover:bg-red-700 transition"
-                    >
-                      Block
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </main>
+                      {alert.status}
+                    </span>
+
+                  </td>
+
+                  <td className="p-3">
+
+                    {alert.status === "blocked" ? (
+
+                      <button
+                        onClick={() =>
+                          unblockIp(alert.ip)
+                        }
+                        className="bg-green-600 hover:bg-green-700 px-3 py-1 rounded"
+                      >
+                        Unblock
+                      </button>
+
+                    ) : (
+
+                      <button
+                        onClick={() =>
+                          blockIp(alert.ip)
+                        }
+                        className="bg-red-600 hover:bg-red-700 px-3 py-1 rounded"
+                      >
+                        Block
+                      </button>
+
+                    )}
+
+                  </td>
+
+                </tr>
+
+              ))}
+
+            </tbody>
+
+          </table>
+
+        </div>
+      </div>
     </div>
   );
 }

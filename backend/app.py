@@ -1,157 +1,395 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import json
+
+import ipaddress
 import subprocess
-import os
+
 from datetime import datetime
+
+from database import SessionLocal
+from models import Alert
+from models import BlockedIP
 
 app = Flask(__name__)
 CORS(app)
 
-ALERTS_FILE = '../alerts/alerts.json'
-print("Alerts file path:", os.path.abspath(ALERTS_FILE))
+
+# --------------------------------------------------
+# Helpers
+# --------------------------------------------------
 
 def current_timestamp():
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-def ensure_alerts_file():
-    """Create alerts file with empty JSON array if it doesn't exist or is empty."""
-    if not os.path.exists(ALERTS_FILE):
-        print("Alerts file not found, creating new one with empty list.")
-        os.makedirs(os.path.dirname(ALERTS_FILE), exist_ok=True)
-        with open(ALERTS_FILE, 'w') as f:
-            json.dump([], f)
-    elif os.path.getsize(ALERTS_FILE) == 0:
-        print("Alerts file is empty, initializing with empty list.")
-        with open(ALERTS_FILE, 'w') as f:
-            json.dump([], f)
 
-def load_alerts():
-    ensure_alerts_file()
+def validate_ip(ip):
     try:
-        with open(ALERTS_FILE, 'r') as f:
-            content = f.read().strip()
-            if not content:
-                print("Alerts file is empty, returning empty list.")
-                return []
-            alerts = json.loads(content)
-            print(f"Loaded alerts: {alerts}")
-            return alerts
-    except json.JSONDecodeError:
-        print("❌ Invalid JSON format, resetting alerts to empty list...")
-        with open(ALERTS_FILE, 'w') as f:
-            json.dump([], f)
-        return []
-    except Exception as e:
-        print(f"❌ Unexpected error reading alerts file: {e}")
-        return []
+        ipaddress.ip_address(ip)
+        return True
+    except ValueError:
+        return False
 
-def save_alerts(alerts):
-    print("Saving alerts to file...")
-    try:
-        with open(ALERTS_FILE, 'w') as f:
-            json.dump(alerts, f, indent=2)
-        print("✅ Alerts saved successfully.")
-    except Exception as e:
-        print(f"❌ Error saving alerts: {e}")
 
 def is_ip_blocked(ip):
-    result = subprocess.run(['sudo', 'iptables', '-C', 'INPUT', '-s', ip, '-j', 'DROP'],
-                            capture_output=True)
+
+    result = subprocess.run(
+        [
+            "iptables",
+            "-C",
+            "INPUT",
+            "-s",
+            ip,
+            "-j",
+            "DROP"
+        ],
+        capture_output=True,
+        text=True
+    )
+
     return result.returncode == 0
 
+
 def run_iptables_command(args):
-    try:
-        subprocess.run(['sudo', 'iptables'] + args, check=True)
-        print("✅ Executed:", ' '.join(['iptables'] + args))
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Failed to execute iptables command: {e}")
-        raise
 
-@app.route('/alerts', methods=['GET'])
-def get_alerts():
-    alerts = load_alerts()
-    return jsonify(alerts)
+    subprocess.run(
+        ["sudo", "iptables"] + args,
+        check=True,
+        capture_output=True,
+        text=True
+    )
 
-@app.route('/block/<ip>', methods=['POST'])
-def block_ip(ip):
-    alerts = load_alerts()
-    print(f"Attempting to block IP: {ip}")
 
-    if is_ip_blocked(ip):
-        return jsonify({"message": f"IP {ip} is already blocked"}), 409
+def alert_to_dict(alert):
 
-    found = False
-    for alert in alerts:
-        if alert['ip'] == ip:
-            alert['status'] = 'blocked'
-            found = True
+    return {
+        "id": alert.id,
+        "timestamp": alert.timestamp,
+        "ip": alert.ip,
+        "type": alert.type,
+        "status": alert.status,
+        "attempts": alert.attempts
+    }
 
-    if not found:
-        alerts.append({
-            "timestamp": current_timestamp(),
-            "ip": ip,
-            "type": "Manual Block",
-            "status": "blocked"
-        })
-    
-    save_alerts(alerts)
 
-    try:
-        run_iptables_command(['-A', 'INPUT', '-s', ip, '-j', 'DROP'])
-        return jsonify({"message": f"IP {ip} blocked"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# --------------------------------------------------
+# Routes
+# --------------------------------------------------
 
-@app.route('/unblock/<ip>', methods=['POST'])
-def unblock_ip(ip):
-    alerts = load_alerts()
-    print(f"Attempting to unblock IP: {ip}")
+@app.route("/health", methods=["GET"])
+def health():
 
-    if not is_ip_blocked(ip):
-        return jsonify({"message": f"IP {ip} is not currently blocked"}), 409
-
-    try:
-        run_iptables_command(['-D', 'INPUT', '-s', ip, '-j', 'DROP'])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    found = False
-    for alert in alerts:
-        if alert['ip'] == ip:
-            alert['status'] = 'active'
-            found = True
-
-    if not found:
-        alerts.append({
-            "timestamp": current_timestamp(),
-            "ip": ip,
-            "type": "Manual Unblock",
-            "status": "active"
-        })
-
-    save_alerts(alerts)
-    return jsonify({"message": f"IP {ip} unblocked"}), 200
-
-@app.route('/report-portscan', methods=['POST'])
-def report_port_scan():
-    data = request.get_json()
-    ip = data.get('ip')
-
-    if not ip:
-        return jsonify({"error": "Missing 'ip' in request"}), 400
-
-    alerts = load_alerts()
-
-    alerts.append({
-        "timestamp": current_timestamp(),
-        "ip": ip,
-        "type": "Port Scanning Attempt",
-        "status": "active"
+    return jsonify({
+        "status": "healthy"
     })
 
-    save_alerts(alerts)
-    return jsonify({"message": f"Port scan attempt by {ip} recorded"}), 201
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# --------------------------------------------------
+
+@app.route("/alerts", methods=["GET"])
+def get_alerts():
+
+    db = SessionLocal()
+
+    try:
+
+        alerts = (
+            db.query(Alert)
+            .order_by(Alert.id.desc())
+            .all()
+        )
+
+        return jsonify([
+            alert_to_dict(alert)
+            for alert in alerts
+        ])
+
+    finally:
+        db.close()
+
+
+# --------------------------------------------------
+
+@app.route("/blocked-ips", methods=["GET"])
+def get_blocked_ips():
+
+    db = SessionLocal()
+
+    try:
+
+        blocked = db.query(BlockedIP).all()
+
+        return jsonify([
+            {
+                "id": row.id,
+                "ip": row.ip
+            }
+            for row in blocked
+        ])
+
+    finally:
+        db.close()
+
+
+# --------------------------------------------------
+
+@app.route("/block/<ip>", methods=["POST"])
+def block_ip(ip):
+
+    if not validate_ip(ip):
+        return jsonify({
+            "error": "Invalid IP"
+        }), 400
+
+    if is_ip_blocked(ip):
+        return jsonify({
+            "message": "IP already blocked"
+        }), 409
+
+    try:
+
+        run_iptables_command([
+            "-A",
+            "INPUT",
+            "-s",
+            ip,
+            "-j",
+            "DROP"
+        ])
+
+        db = SessionLocal()
+
+        try:
+
+            existing = (
+                db.query(BlockedIP)
+                .filter(BlockedIP.ip == ip)
+                .first()
+            )
+
+            if not existing:
+
+                db.add(
+                    BlockedIP(
+                        ip=ip
+                    )
+                )
+
+            alerts = (
+                db.query(Alert)
+                .filter(Alert.ip == ip)
+                .all()
+            )
+
+            for alert in alerts:
+                alert.status = "blocked"
+
+            db.commit()
+
+        finally:
+            db.close()
+
+        return jsonify({
+            "message": f"{ip} blocked"
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+# --------------------------------------------------
+
+@app.route("/unblock/<ip>", methods=["POST"])
+def unblock_ip(ip):
+
+    if not validate_ip(ip):
+        return jsonify({
+            "error": "Invalid IP"
+        }), 400
+
+    if not is_ip_blocked(ip):
+        return jsonify({
+            "message": "IP is not blocked"
+        }), 409
+
+    try:
+
+        run_iptables_command([
+            "-D",
+            "INPUT",
+            "-s",
+            ip,
+            "-j",
+            "DROP"
+        ])
+
+        db = SessionLocal()
+
+        try:
+
+            blocked = (
+                db.query(BlockedIP)
+                .filter(BlockedIP.ip == ip)
+                .first()
+            )
+
+            if blocked:
+                db.delete(blocked)
+
+            alerts = (
+                db.query(Alert)
+                .filter(Alert.ip == ip)
+                .all()
+            )
+
+            for alert in alerts:
+                alert.status = "active"
+
+            db.commit()
+
+        finally:
+            db.close()
+
+        return jsonify({
+            "message": f"{ip} unblocked"
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
+
+
+# --------------------------------------------------
+
+@app.route("/report-portscan", methods=["POST"])
+def report_portscan():
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({
+            "error": "Missing JSON body"
+        }), 400
+
+    ip = data.get("ip")
+
+    if not ip:
+        return jsonify({
+            "error": "Missing IP"
+        }), 400
+
+    if not validate_ip(ip):
+        return jsonify({
+            "error": "Invalid IP"
+        }), 400
+
+    db = SessionLocal()
+
+    try:
+
+        existing = (
+            db.query(Alert)
+            .filter(
+                Alert.ip == ip,
+                Alert.type == "Port Scanning Attempt",
+                Alert.status == "active"
+            )
+            .first()
+        )
+
+        if not existing:
+
+            db.add(
+                Alert(
+                    timestamp=current_timestamp(),
+                    ip=ip,
+                    type="Port Scanning Attempt",
+                    status="active",
+                    attempts=None
+                )
+            )
+
+            db.commit()
+
+        return jsonify({
+            "message": "Port scan recorded"
+        }), 201
+
+    finally:
+        db.close()
+
+
+# --------------------------------------------------
+
+@app.route("/report-bruteforce", methods=["POST"])
+def report_bruteforce():
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({
+            "error": "Missing JSON body"
+        }), 400
+
+    ip = data.get("ip")
+    attempts = data.get("attempts", 0)
+
+    if not ip:
+        return jsonify({
+            "error": "Missing IP"
+        }), 400
+
+    if not validate_ip(ip):
+        return jsonify({
+            "error": "Invalid IP"
+        }), 400
+
+    db = SessionLocal()
+
+    try:
+
+        existing = (
+            db.query(Alert)
+            .filter(
+                Alert.ip == ip,
+                Alert.type == "Brute Force Login Attempt",
+                Alert.status == "active"
+            )
+            .first()
+        )
+
+        if not existing:
+
+            db.add(
+                Alert(
+                    timestamp=current_timestamp(),
+                    ip=ip,
+                    type="Brute Force Login Attempt",
+                    status="active",
+                    attempts=attempts
+                )
+            )
+
+            db.commit()
+
+        return jsonify({
+            "message": "Bruteforce alert recorded"
+        }), 201
+
+    finally:
+        db.close()
+
+
+# --------------------------------------------------
+
+if __name__ == "__main__":
+
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=False
+    )
